@@ -1,5 +1,13 @@
-# C++ Matching Engine
+# Matching Engine
 
-Implemented a C++ limit order book and price-time-priority matching engine
-supporting limit orders, partial fills, FIFO execution, cancellations, and
-deterministic trade generation.
+C++23 limit order book and price-time-priority matching engine.
+
+## Current version
+
+v0.1
+
+Supports:
+- limit buy/sell orders
+- partial fills
+- FIFO within price levels
+- cancellations
