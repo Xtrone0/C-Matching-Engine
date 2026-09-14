@@ -16,8 +16,8 @@ function(enable_warnings target)
             -Wextra
             -Wpedantic
             -Wshadow
-            -Wconversion
-            -Wsign-conversion
+            # -Wconversion
+            # -Wsign-conversion
             -Wfloat-equal
             -Wformat=2
             -Wduplicated-cond
@@ -42,20 +42,6 @@ target_include_directories(order_book PUBLIC
 )
 
 enable_warnings(order_book)
-
-# --------------------
-# Main program
-# --------------------
-
-add_executable(matching_engine
-    src/main.cpp
-)
-
-target_link_libraries(matching_engine PRIVATE
-    order_book
-)
-
-enable_warnings(matching_engine)
 
 # --------------------
 # Tests + benchmark

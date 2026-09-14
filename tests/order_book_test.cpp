@@ -14,7 +14,7 @@
 
 #define CHECK(expr)                                                     \
     do                                                                  \
-    {                                                                   \
+    { /*  */                                                            \
         if (!(expr))                                                    \
         {                                                               \
             std::cerr << "CHECK failed: " #expr                         \
