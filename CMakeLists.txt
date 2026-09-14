@@ -16,6 +16,7 @@ function(enable_warnings target)
             -Wextra
             -Wpedantic
             -Wshadow
+
             # -Wconversion
             # -Wsign-conversion
             -Wfloat-equal
@@ -32,7 +33,6 @@ endfunction()
 # --------------------
 # Order book library
 # --------------------
-
 add_library(order_book
     src/order_book.cpp
 )
@@ -46,7 +46,6 @@ enable_warnings(order_book)
 # --------------------
 # Tests + benchmark
 # --------------------
-
 add_executable(order_book_tests
     tests/order_book_test.cpp
 )

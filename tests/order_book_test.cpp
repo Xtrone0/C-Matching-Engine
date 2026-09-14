@@ -1,4 +1,4 @@
-#include "order_book.hpp"
+#include "../src/order_book.cpp"
 
 #include <algorithm>
 #include <array>
@@ -56,7 +56,6 @@ void check_best(
 // ------------------------------------------------------------
 // Empty book
 // ------------------------------------------------------------
-
 void test_empty_book()
 {
     OrderBook book;
@@ -67,7 +66,6 @@ void test_empty_book()
 // ------------------------------------------------------------
 // Resting orders
 // ------------------------------------------------------------
-
 void test_resting_buy()
 {
     OrderBook book;
@@ -109,7 +107,6 @@ void test_one_tick_outside_cross()
 // ------------------------------------------------------------
 // Exact fills
 // ------------------------------------------------------------
-
 void test_exact_fill_buy()
 {
     OrderBook book;
@@ -152,7 +149,6 @@ void test_quantity_one()
 // ------------------------------------------------------------
 // Partial fills
 // ------------------------------------------------------------
-
 void test_partial_resting_fill()
 {
     OrderBook book;
@@ -216,7 +212,6 @@ void test_partial_fill_then_cancel()
 // v0.1 rule:
 // trade executes at the RESTING order's price.
 // ------------------------------------------------------------
-
 void test_resting_sell_determines_execution_price()
 {
     OrderBook book;
@@ -242,7 +237,6 @@ void test_resting_buy_determines_execution_price()
 // ------------------------------------------------------------
 // FIFO / time priority
 // ------------------------------------------------------------
-
 void test_fifo()
 {
     OrderBook book;
@@ -270,7 +264,6 @@ void test_fifo()
 // ------------------------------------------------------------
 // Price priority
 // ------------------------------------------------------------
-
 void test_ask_price_priority()
 {
     OrderBook book;
@@ -321,7 +314,6 @@ void test_bid_price_priority()
 // ------------------------------------------------------------
 // Multiple fills and multiple levels
 // ------------------------------------------------------------
-
 void test_multiple_fills_same_price()
 {
     OrderBook book;
@@ -375,7 +367,6 @@ void test_multi_level_sweep_with_residual()
 // ------------------------------------------------------------
 // Price-level removal / best-price updates
 // ------------------------------------------------------------
-
 void test_price_level_removed_after_fill()
 {
     OrderBook book;
@@ -434,7 +425,6 @@ void test_best_ask_updates()
 // ------------------------------------------------------------
 // Cancellation
 // ------------------------------------------------------------
-
 void test_cancel_only_order()
 {
     OrderBook book;
@@ -529,7 +519,6 @@ void test_cancel_removes_best_price_level()
 // ------------------------------------------------------------
 // Large integral values
 // ------------------------------------------------------------
-
 void test_large_price_and_quantity()
 {
     OrderBook book;
@@ -549,7 +538,6 @@ void test_large_price_and_quantity()
 // ------------------------------------------------------------
 // Many orders at one price
 // ------------------------------------------------------------
-
 void test_many_orders_same_price()
 {
     constexpr int N = 1000;
@@ -571,7 +559,6 @@ void test_many_orders_same_price()
 // ------------------------------------------------------------
 // Many price levels
 // ------------------------------------------------------------
-
 void test_many_price_levels()
 {
     constexpr int N = 100;
@@ -598,7 +585,6 @@ void test_many_price_levels()
 // ------------------------------------------------------------
 // Longer deterministic sequence
 // ------------------------------------------------------------
-
 void test_long_sequence()
 {
     OrderBook book;
@@ -650,7 +636,6 @@ void test_long_sequence()
 // This is NOT a substitute for deterministic tests.
 // It mainly checks that submit/cancel sequences never leave a crossed book.
 // ------------------------------------------------------------
-
 void test_randomized_invariants()
 {
     constexpr int EVENTS = 10000;
@@ -757,7 +742,6 @@ void benchmark_10000_random_orders()
 // ------------------------------------------------------------
 // Test runner
 // ------------------------------------------------------------
-
 int main()
 {
     test_empty_book();
