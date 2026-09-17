@@ -48,11 +48,11 @@ These checks detect container/iterator misuse and are not memory sanitizers.
 
 ## Targets
 
-| Target | Purpose |
-| --- | --- |
-| `order_book` | Matching-engine library. |
-| `order_book_tests` | All scenarios and regressions; supports individual test selection. |
-| `order_book_benchmark` | Timing benchmarks; excluded from CTest. |
+| Target                 | Purpose                                                            |
+| ---------------------- | ------------------------------------------------------------------ |
+| `order_book`           | Matching-engine library.                                           |
+| `order_book_tests`     | All scenarios and regressions; supports individual test selection. |
+| `order_book_benchmark` | Timing benchmarks; excluded from CTest.                            |
 
 For debugging, run `gdb .\build\order_book_tests.exe`, set
 `break passive_orders_both_sides`, then use `run`, `next`, and `step`.

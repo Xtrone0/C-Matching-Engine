@@ -40,14 +40,7 @@ void OrderBook::removeEmpty(T &side)
     {
         auto &orders = begin(side)->second;
         if (orders.front().quantity == 0)
-        {
-            active.erase(orders.front().id);
-            orders.erase(begin(orders));
-        }
-        if (orders.size() == 0)
-        {
-            side.erase(begin(side));
-        }
+            cancel(orderes.front().id);
     }
 }
 // Executes a trade if the best bid is currently bigger than or equal to the best ask

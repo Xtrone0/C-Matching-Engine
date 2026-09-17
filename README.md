@@ -11,6 +11,19 @@ See [build instructions](docs/building.md), [test coverage](tests/README.md),
 and [benchmark commands and methodology](benchmarks/README.md).
 Amendments are not yet implemented.
 
+## Repository structure
+
+```text
+.
+|-- include/             # Order types and order-book interface
+|-- src/                 # Matching and cancellation implementation
+|-- tests/               # Unified regression suite and test helpers
+|-- benchmarks/          # Timing benchmarks and scan cancellation baseline
+|   `-- results/         # Recorded measurements and console logs
+|-- docs/                # Build, test, and debugging instructions
+`-- CMakeLists.txt       # Library, test, and benchmark targets
+```
+
 ## Cancellation performance
 
 Measured on an Intel Core i9-12900K, Windows x64, GCC 16.2.0, C++23,
