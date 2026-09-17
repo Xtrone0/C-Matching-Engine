@@ -1,0 +1,20 @@
+
+Benchmark: 10000 random orders
+Runs:    5
+Average: 1361.56 us
+Low:     1287.20 us
+High:    1498.80 us
+Average: 7344516.58 orders/sec
+
+Cancellation benchmark: shuffled IDs, both sides
+One warm-up pair, then 5 measured pairs per workload
+100,000-order books use 1000 cancellations per sample
+Medians in ns/cancel; speedup = scan / indexed
+
+    Orders     Cancels   Levels/side            Scan         Indexed     Speedup
+      1000        1000             1          400.80           46.40       8.64x
+      1000        1000           100          438.40           57.10       7.68x
+     10000       10000             1         8366.73           47.18     177.34x
+     10000       10000           100         4294.47           49.75      86.32x
+    100000        1000             1       523774.40          274.90    1905.33x
+    100000        1000           100      1030746.90          154.00    6693.16x
