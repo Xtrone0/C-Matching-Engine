@@ -40,7 +40,7 @@ void OrderBook::removeEmpty(T &side)
     {
         auto &orders = begin(side)->second;
         if (orders.front().quantity == 0)
-            cancel(orderes.front().id);
+            cancel(orders.front().id);
     }
 }
 // Executes a trade if the best bid is currently bigger than or equal to the best ask
@@ -226,4 +226,29 @@ void OrderBook::assert_invariants() const
     };
     checkLocations(bids, Side::Buy);
     checkLocations(asks, Side::Sell);
+}
+std::vector<Trade> OrderBook::amend(
+    OrderId id,
+    Price newPrice,
+    Quantity newRemaining)
+{
+    if (order.quantity == 0 or order.quantity > 1'000'000'000)
+        throw std::invalid_argument("Quantity out of range");
+
+    if (not active.contains(id))
+        throw std::invalid_argument("Id not found");
+    if (newPrice < 1 or newPrice > 1'000'000'000)
+        throw std::invalid_argument("Price out of range");
+    Order order = *(active[id].order);
+    std::vector<Trade> trades;
+    if (newPrice == order.price and newRemaining <= order.quantity)
+        active[id].order->quantity = newRemaining;
+    else
+    {
+        cancel(id);
+        order.price = newPrice;
+        order.quantity = newRemaining;
+        trades = submit(order);
+    }
+    return trades;
 }

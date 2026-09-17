@@ -66,7 +66,9 @@ class OrderBook
     std::vector<SnapshotLevel> snapside(const T &side) const;
     void validateOrder(const Order &order) const;
     template <class T>
-    void assert_invariantsLevel(const T &side, const Side type, std::unordered_set<OrderId> &observed) const;
+    void assert_invariantsLevel(const T &side,
+                                const Side type,
+                                std::unordered_set<OrderId> &observed) const;
     static Quantity checkedInvariantTotal(Quantity total, Quantity quantity);
 
 public:
@@ -81,6 +83,11 @@ public:
         OrderId id,
         Side side,
         Quantity quantity);
+    std::vector<Trade> amend(
+        OrderId id,
+        Price newPrice,
+        Quantity newRemaining);
+
     OrderBook() = default;
 
     OrderBook(const OrderBook &) = delete;

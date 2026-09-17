@@ -29,4 +29,7 @@ public:
     bool cancel(OrderId id) {
         return checked([&] { return OrderBook::cancel(id); });
     }
+    std::vector<Trade> amend(OrderId id, Price newPrice, Quantity newRemaining) {
+        return checked([&] { return OrderBook::amend(id, newPrice, newRemaining); });
+    }
 };
