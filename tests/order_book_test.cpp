@@ -1,6 +1,9 @@
 #include "checked_order_book.hpp"
 #include "order_book_test_access.hpp"
 #include "test_trace.hpp"
+#include "reference_book.hpp"
+#include "../benchmarks/workloads.hpp"
+#include "../benchmarks/metrics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -665,120 +668,7 @@ namespace
     }
     void check_snapshot(const Snapshot &actual, const Snapshot &expected);
     // Independent reference: flat arrival-ordered vector; scan to choose the best maker.
-    class ReferenceBook
-    {
-        Priority next_priority = 0;
-
-    public:
-        std::vector<Order> resting;
-        std::vector<Trade> submit(Order incoming)
-        {
-            return process(incoming, false);
-        }
-        std::vector<Trade> submit_market(OrderId id, Side side, Quantity quantity)
-        {
-            return process(order(id, side, 0, quantity), true);
-        }
-        std::vector<Trade> process(Order incoming, bool is_market)
-        {
-            if (incoming.id == 0 || (incoming.side != Side::Buy && incoming.side != Side::Sell) || incoming.quantity == 0 || incoming.quantity > max_quantity || (!is_market && (incoming.price < 1 || incoming.price > max_price)))
-                throw std::invalid_argument("Invalid reference input");
-            if (std::any_of(resting.begin(), resting.end(), [&](const auto &item)
-                            {
-                                return item.id == incoming.id;
-                            }))
-                throw std::invalid_argument("Duplicate reference ID");
-            std::vector<Trade> result;
-            while (incoming.quantity > 0)
-            {
-                auto best = resting.end();
-                for (auto it = resting.begin(); it != resting.end(); ++it)
-                {
-                    if (it->side == incoming.side)
-                        continue;
-                    const bool crosses = is_market || (incoming.side == Side::Buy ? incoming.price >= it->price : incoming.price <= it->price);
-                    if (!crosses)
-                        continue;
-                    if (best == resting.end() || (incoming.side == Side::Buy ? it->price < best->price : it->price > best->price))
-                        best = it;
-                }
-                if (best == resting.end())
-                    break;
-                const Quantity q = std::min(incoming.quantity, best->quantity);
-                result.push_back(execution(incoming.side, incoming.id, best->id, best->price, q));
-                incoming.quantity -= q;
-                best->quantity -= q;
-                if (best->quantity == 0)
-                    resting.erase(best);
-            }
-            if (!is_market && incoming.quantity > 0)
-            {
-                incoming.priority = ++next_priority;
-                resting.push_back(incoming);
-            }
-            return result;
-        }
-        Snapshot snapshot() const
-        {
-            auto sorted = resting;
-            std::stable_sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b)
-                             {
-                                 if (a.side != b.side)
-                                     return a.side == Side::Buy;
-                                 return a.side == Side::Buy ? a.price > b.price : a.price < b.price;
-                             });
-            Snapshot result;
-            for (const auto &item : sorted)
-            {
-                auto &levels = item.side == Side::Buy ? result.bids : result.asks;
-                if (levels.empty() || levels.back().price != item.price)
-                    levels.push_back({item.price, 0, {}});
-                levels.back().quantity += item.quantity; // Bounded test workloads.
-                levels.back().orders.push_back(item);
-            }
-            return result;
-        }
-        Quantity cancel(OrderId id)
-        {
-            const auto it = std::find_if(resting.begin(), resting.end(),
-                                         [id](const Order &item)
-                                         {
-                                             return item.id == id;
-                                         });
-            if (it == resting.end())
-                return 0;
-            const Quantity q = it->quantity;
-            resting.erase(it);
-            return q;
-        }
-        std::vector<Trade> amend(OrderId id, Price newPrice, Quantity newRemaining)
-        {
-            if (newPrice < 1 || newPrice > max_price || newRemaining == 0 || newRemaining > max_quantity)
-                throw std::invalid_argument("Invalid reference amendment");
-            const auto it = std::find_if(resting.begin(), resting.end(),
-                [id](const Order& item) { return item.id == id; });
-            if (it == resting.end()) throw std::invalid_argument("Unknown reference ID");
-            if (newPrice == it->price && newRemaining <= it->quantity) {
-                it->quantity = newRemaining;
-                return {};
-            }
-            Order replacement{id, it->side, newPrice, newRemaining};
-            resting.erase(it);
-            return process(replacement, false);
-        }
-        std::optional<Price> best(Side side) const
-        {
-            std::optional<Price> result;
-            for (const auto &item : resting)
-            {
-                if (item.side != side)
-                    continue;
-                if (!result || (side == Side::Buy ? item.price > *result : item.price < *result))
-                    result = item.price;
-            }
-            return result;
-        }
-    };
+    using test_support::ReferenceBook;
     void check_observable_state(const CheckedOrderBook &actual, const ReferenceBook &expected)
     {
         CHECK(actual.best_bid() == expected.best(Side::Buy));
@@ -1267,33 +1157,9 @@ namespace
     using test_trace::Action;
     using test_trace::Command;
     using test_trace::CommandResult;
-    template <class Book>
-    CommandResult run_command(Book &book, const Command &command)
-    {
-        CommandResult result;
-        try
-        {
-            switch (command.action)
-            {
-            case Action::Limit:
-                result.trades = book.submit(order(command.id, command.side, command.price, command.quantity));
-                break;
-            case Action::Market:
-                result.trades = book.submit_market(command.id, command.side, command.quantity);
-                break;
-            case Action::Cancel:
-                result.canceled = book.cancel(command.id) != 0;
-                break;
-            case Action::Amend:
-                result.trades = book.amend(command.id, command.price, command.quantity);
-                break;
-            }
-        }
-        catch (const std::invalid_argument &)
-        {
-            result.rejected = true;
-        }
-        return result;
+    template<class Book>
+    CommandResult run_command(Book& book, const Command& command) {
+        return replay::execute(book, command);
     }
     enum class TestFault { None, TradePrice };
     struct ComparisonFailure : std::runtime_error {
@@ -2642,6 +2508,100 @@ TEST_CASE(replay_minimized_trade_price_regression) {
     }
     const auto injected = replay_failure(commands, TestFault::TradePrice);
     CHECK(injected && injected->signature == "NEW:trade.price");
+}
+
+void differential_workload_family(benchmark::Family family) {
+    for (std::uint64_t seed : {19u, 2026u}) {
+        const auto workload = benchmark::generate(family, 1200, 300, seed);
+        CheckedOrderBook book;
+        ReferenceBook reference;
+        TraceSession trace(workload.name);
+        std::array<std::size_t, 4> operations{};
+        std::size_t canceled = 0, unknown = 0, rejected = 0, trades = 0;
+        std::size_t noop = 0, reductions = 0, increases = 0, reprices = 0;
+        for (std::size_t i = 0; i < workload.commands.size(); ++i) {
+            const auto& command = workload.commands[i];
+            const auto found = std::find_if(reference.resting.begin(), reference.resting.end(),
+                [&](const Order& item) { return item.id == command.id; });
+            const auto previous = found == reference.resting.end() ? std::optional<Order>{} : *found;
+            const auto result = trace.compare(book, reference, command);
+            if (i < workload.setup) continue;
+            ++operations[static_cast<std::size_t>(command.action)];
+            canceled += result.canceled;
+            unknown += command.action == Action::Cancel && !result.canceled;
+            rejected += result.rejected;
+            trades += result.trades.size();
+            if (command.action == Action::Amend && previous && !result.rejected) {
+                if (command.price != previous->price) ++reprices;
+                else if (command.quantity < previous->quantity) ++reductions;
+                else if (command.quantity > previous->quantity) ++increases;
+                else ++noop;
+            }
+            if (family == benchmark::Family::Deep) CHECK(result.trades.empty());
+            if (family == benchmark::Family::SinglePrice) {
+                CHECK(book.snapshot().asks.empty());
+                CHECK(book.snapshot().bids.size() <= 1);
+            }
+        }
+        CHECK(canceled > 50);
+        CHECK(unknown > 0);
+        CHECK(noop > 0 && reductions > 0 && increases > 0);
+        if (family == benchmark::Family::CancellationHeavy) CHECK(operations[2] > 700);
+        if (family == benchmark::Family::Deep) {
+            CHECK(trades == 0 && reprices > 0);
+            const auto snapshot = book.snapshot();
+            CHECK(snapshot.bids.size() + snapshot.asks.size() > 200);
+        }
+        if (family == benchmark::Family::SinglePrice) CHECK(trades > 100 && operations[1] > 100);
+        std::cout << workload.name << " new=" << operations[0] << " market=" << operations[1]
+                  << " cancel=" << operations[2] << " amend=" << operations[3]
+                  << " successful_cancels=" << canceled << " unknown_cancels=" << unknown
+                  << " rejected=" << rejected << " trades=" << trades << " noop=" << noop
+                  << " reductions=" << reductions << " increases=" << increases
+                  << " reprices=" << reprices << '\n';
+    }
+}
+TEST_CASE(differential_cancellation_heavy_workloads) {
+    differential_workload_family(benchmark::Family::CancellationHeavy);
+}
+TEST_CASE(differential_deep_noncrossing_workloads) {
+    differential_workload_family(benchmark::Family::Deep);
+}
+TEST_CASE(differential_single_price_workloads) {
+    differential_workload_family(benchmark::Family::SinglePrice);
+}
+TEST_CASE(command_runner_works_with_plain_book_and_existing_state) {
+    OrderBook book;
+    book.submit({10, Side::Sell, 101, 4});
+    const std::vector<Command> commands{
+        {Action::Market, 20, Side::Buy, 0, 3},
+        {Action::Amend, 10, Side::Buy, 102, 2},
+        {Action::Limit, 30, Side::Buy, 100, 0},
+        {Action::Cancel, 10, Side::Buy, 0, 0},
+        {Action::Cancel, 999, Side::Buy, 0, 0}};
+    const auto results = replay::run(book, commands);
+    CHECK(results.size() == commands.size());
+    check_trades(results[0].trades, {{20, 10, 101, 3}});
+    CHECK(!results[1].rejected && results[1].trades.empty());
+    CHECK(results[2].rejected);
+    CHECK(results[3].canceled && !results[4].canceled);
+    check_snapshot(book.snapshot(), Snapshot{});
+    CHECK(replay::run(book, std::span<const Command>{}).empty());
+    const auto invalid = replay::execute(book, {static_cast<Action>(99), 1, Side::Buy, 100, 1});
+    CHECK(invalid.rejected);
+    book.assert_invariants();
+}
+
+TEST_CASE(benchmark_statistics_use_median_and_nearest_rank) {
+    const std::vector<double> samples{20, 2, 1, 3, 2};
+    CHECK(std::abs(benchmark::median(samples) - 2) < 1e-12);
+    CHECK(std::abs(benchmark::median({1, 2, 3, 4}) - 2.5) < 1e-12);
+    CHECK(std::abs(benchmark::quantile(samples, .5) - 2) < 1e-12);
+    CHECK(std::abs(benchmark::quantile(samples, .99) - 20) < 1e-12);
+    CHECK(std::abs(benchmark::median_throughput({1, 2, 3, 4}) - (1e9 / 2 + 1e9 / 3) / 2) < 1);
+    expect_rejection([] { (void)benchmark::median_throughput({0}); });
+    expect_rejection([] { (void)benchmark::median({}); });
+    expect_rejection([] { (void)benchmark::quantile({1}, 0); });
 }
 
 int trace_cli(int argc, char** argv) {

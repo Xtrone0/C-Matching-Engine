@@ -20,7 +20,7 @@ All scenarios and regressions live in `order_book_test.cpp` and run through
 .\build\order_book_tests.exe snapshot_empty_book
 ```
 
-**Verified 2026-09-17: all 111 cases passed in Debug, Release, and Checked,
+**Verified 2026-09-17: all 116 cases passed in Debug, Release, and Checked,
 with no failures or skips.**
 
 ## Coverage
@@ -43,10 +43,13 @@ rejection. Checks throw `std::logic_error` and remain active in Release.
 Tests substitute live iterators when checking corrupt locations; Checked builds
 also detect iterator misuse. Sanitizer validation is not claimed.
 
-An independent flat-vector reference checks trades and complete state against a
+The independent flat-vector reference in `reference_book.hpp` checks trades and complete state against a
 saved 20-command sequence, five 400-command random streams, three 1,000-command
 mixed streams including amendments, three 1,500-command amendment-heavy streams,
 and all 11,110 sequences of lengths 1–4 over a fixed 10-command alphabet.
+Two seeds each also cover cancellation-heavy, deep noncrossing, and single-price
+workloads (300 setup orders and 1,200 commands), with operation/outcome counters
+and assertions for successful cancellations and amendment priority transitions.
 Exhaustive coverage is limited to that alphabet and length; that alphabet does
 not include amendments. Amendment-heavy streams require every transition category.
 

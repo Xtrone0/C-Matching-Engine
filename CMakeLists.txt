@@ -80,4 +80,8 @@ endforeach()
 # Timing benchmarks run separately from correctness tests and CTest.
 add_executable(order_book_benchmark benchmarks/order_book_benchmark.cpp)
 target_link_libraries(order_book_benchmark PRIVATE order_book)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" BENCHMARK_BUILD_TYPE_UPPER)
+set(BENCHMARK_EFFECTIVE_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${BENCHMARK_BUILD_TYPE_UPPER}}")
+configure_file(benchmarks/build_info.hpp.in generated/benchmark_build_info.hpp @ONLY)
+target_include_directories(order_book_benchmark PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 enable_warnings(order_book_benchmark)

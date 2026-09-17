@@ -1,0 +1,7 @@
+workload,file,setup_commands,measured_commands,start_orders,end_orders,min_orders,max_orders,start_levels,new,market,cancel,amend,trades,canceled,rejected
+cancel-1000-1000-levels-1,workloads/cancel-1000-1000-levels-1.trace,1000,1000,1000,0,0,1000,2,0,0,1000,0,0,1000,0
+cancel-1000-1000-levels-100,workloads/cancel-1000-1000-levels-100.trace,1000,1000,1000,0,0,1000,200,0,0,1000,0,0,1000,0
+cancel-10000-10000-levels-1,workloads/cancel-10000-10000-levels-1.trace,10000,10000,10000,0,0,10000,2,0,0,10000,0,0,10000,0
+cancel-10000-10000-levels-100,workloads/cancel-10000-10000-levels-100.trace,10000,10000,10000,0,0,10000,200,0,0,10000,0,0,10000,0
+cancel-100000-10000-levels-1,workloads/cancel-100000-10000-levels-1.trace,100000,10000,100000,90000,90000,100000,2,0,0,10000,0,0,10000,0
+cancel-100000-10000-levels-100,workloads/cancel-100000-10000-levels-100.trace,100000,10000,100000,90000,90000,100000,200,0,0,10000,0,0,10000,0

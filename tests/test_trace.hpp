@@ -1,5 +1,5 @@
 #pragma once
-#include "order_book.hpp"
+#include "command_runner.hpp"
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -9,19 +9,9 @@
 #include <vector>
 
 namespace test_trace {
-enum class Action { Limit, Market, Cancel, Amend };
-struct Command {
-    Action action;
-    OrderId id;
-    Side side;
-    Price price;
-    Quantity quantity;
-};
-struct CommandResult {
-    bool rejected = false;
-    bool canceled = false;
-    std::vector<Trade> trades;
-};
+using replay::Action;
+using replay::Command;
+using replay::CommandResult;
 
 inline const char* name(Action action) {
     switch (action) {

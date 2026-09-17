@@ -1,0 +1,12 @@
+workload,file,setup_commands,measured_commands,start_orders,end_orders,min_orders,max_orders,start_levels,new,market,cancel,amend,trades,canceled,rejected
+submissions-7,workloads/submissions-7.trace,0,10000,0,1713,0,1713,0,10000,0,0,0,7852,0,0
+mixed-7,workloads/mixed-7.trace,1000,10000,1000,0,0,1000,2,4374,1495,2115,2016,3850,1716,683
+cancellation-heavy-7,workloads/cancellation-heavy-7.trace,1000,10000,1000,0,0,1000,2,2015,0,7018,967,0,3015,531
+deep-noncrossing-7,workloads/deep-noncrossing-7.trace,1000,10000,1000,3711,1000,3712,1000,4982,0,2548,2470,0,2271,0
+single-price-7,workloads/single-price-7.trace,1000,10000,1000,3120,1000,3124,1,4962,1443,1527,2068,2773,1369,0
+cancel-1000-1000-levels-1,workloads/cancel-1000-1000-levels-1.trace,1000,1000,1000,0,0,1000,2,0,0,1000,0,0,1000,0
+cancel-1000-1000-levels-100,workloads/cancel-1000-1000-levels-100.trace,1000,1000,1000,0,0,1000,200,0,0,1000,0,0,1000,0
+cancel-10000-10000-levels-1,workloads/cancel-10000-10000-levels-1.trace,10000,10000,10000,0,0,10000,2,0,0,10000,0,0,10000,0
+cancel-10000-10000-levels-100,workloads/cancel-10000-10000-levels-100.trace,10000,10000,10000,0,0,10000,200,0,0,10000,0,0,10000,0
+cancel-100000-1000-levels-1,workloads/cancel-100000-1000-levels-1.trace,100000,1000,100000,99000,99000,100000,2,0,0,1000,0,0,1000,0
+cancel-100000-1000-levels-100,workloads/cancel-100000-1000-levels-100.trace,100000,1000,100000,99000,99000,100000,200,0,0,1000,0,0,1000,0
