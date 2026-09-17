@@ -1,5 +1,6 @@
 #include "checked_order_book.hpp"
 #include "order_book_test_access.hpp"
+#include "test_trace.hpp"
 
 #include <algorithm>
 #include <array>
@@ -750,6 +751,21 @@ namespace
             resting.erase(it);
             return q;
         }
+        std::vector<Trade> amend(OrderId id, Price newPrice, Quantity newRemaining)
+        {
+            if (newPrice < 1 || newPrice > max_price || newRemaining == 0 || newRemaining > max_quantity)
+                throw std::invalid_argument("Invalid reference amendment");
+            const auto it = std::find_if(resting.begin(), resting.end(),
+                [id](const Order& item) { return item.id == id; });
+            if (it == resting.end()) throw std::invalid_argument("Unknown reference ID");
+            if (newPrice == it->price && newRemaining <= it->quantity) {
+                it->quantity = newRemaining;
+                return {};
+            }
+            Order replacement{id, it->side, newPrice, newRemaining};
+            resting.erase(it);
+            return process(replacement, false);
+        }
         std::optional<Price> best(Side side) const
         {
             std::optional<Price> result;
@@ -772,57 +788,7 @@ namespace
         actual.assert_invariants();
         check_snapshot(actual.snapshot(), expected.snapshot());
     }
-    void differential(std::uint64_t seed, bool shuffled)
-    {
-        constexpr int events = 400;
-        std::mt19937_64 rng(seed);
-        std::vector<OrderId> ids(events);
-        std::iota(ids.begin(), ids.end(), OrderId{1});
-        if (shuffled)
-            std::shuffle(ids.begin(), ids.end(), rng);
-        std::vector<OrderId> submitted;
-        CheckedOrderBook actual;
-        ReferenceBook reference;
-        Quantity accepted = 0, executed = 0, canceled = 0;
-        std::size_t next = 0;
-        for (int event = 0; event < events; ++event)
-        {
-            try
-            {
-                if (!submitted.empty() && rng() % 100 < 35)
-                {
-                    const OrderId id = rng() % 5 == 0 ? 999'999 : submitted[rng() % submitted.size()];
-                    const Quantity q = reference.cancel(id);
-                    CHECK(actual.cancel(id) == (q > 0));
-                    canceled += q;
-                }
-                else
-                {
-                    const auto incoming = order(ids[next++], rng() % 2 ? Side::Buy : Side::Sell,
-                                                95 + static_cast<Price>(rng() % 11), 1 + static_cast<Quantity>(rng() % 20));
-                    submitted.push_back(incoming.id);
-                    const auto expected = reference.submit(incoming);
-                    check_trades(actual.submit(incoming), expected);
-                    accepted += incoming.quantity;
-                    for (const auto &trade : expected)
-                        executed += trade.quantity;
-                }
-                Quantity resting = 0;
-                for (const auto &item : reference.resting)
-                {
-                    CHECK(item.quantity > 0);
-                    resting += item.quantity;
-                }
-                CHECK(accepted == 2 * executed + canceled + resting);
-                check_observable_state(actual, reference);
-            }
-            catch (const std::exception &e)
-            {
-                throw std::runtime_error("seed=" + std::to_string(seed) +
-                                         " event=" + std::to_string(event) + ": " + e.what());
-            }
-        }
-    }
+    void differential(std::uint64_t seed, bool shuffled);
     TEST_CASE(differential_limit_cancel_seeded_streams)
     {
         for (std::uint64_t seed : {42u, 598u})
@@ -1298,26 +1264,9 @@ namespace
         }
     }
 
-    enum class Action
-    {
-        Limit,
-        Market,
-        Cancel
-    };
-    struct Command
-    {
-        Action action;
-        OrderId id;
-        Side side;
-        Price price;
-        Quantity quantity;
-    };
-    struct CommandResult
-    {
-        bool rejected = false;
-        bool canceled = false;
-        std::vector<Trade> trades;
-    };
+    using test_trace::Action;
+    using test_trace::Command;
+    using test_trace::CommandResult;
     template <class Book>
     CommandResult run_command(Book &book, const Command &command)
     {
@@ -1335,6 +1284,9 @@ namespace
             case Action::Cancel:
                 result.canceled = book.cancel(command.id) != 0;
                 break;
+            case Action::Amend:
+                result.trades = book.amend(command.id, command.price, command.quantity);
+                break;
             }
         }
         catch (const std::invalid_argument &)
@@ -1343,25 +1295,148 @@ namespace
         }
         return result;
     }
-    CommandResult compare_command(CheckedOrderBook &book, ReferenceBook &reference,
-                                  const Command &command, std::size_t step)
-    {
-        try
-        {
-            const auto before = book.snapshot();
-            const auto expected = run_command(reference, command);
-            const auto actual = run_command(book, command);
-            CHECK(actual.rejected == expected.rejected);
-            CHECK(actual.canceled == expected.canceled);
-            check_trades(actual.trades, expected.trades);
-            check_observable_state(book, reference);
-            if (actual.rejected || (command.action == Action::Cancel && !actual.canceled))
-                check_snapshot(book.snapshot(), before);
-            return actual;
+    enum class TestFault { None, TradePrice };
+    struct ComparisonFailure : std::runtime_error {
+        std::string signature;
+        std::string report;
+        std::size_t step;
+        ComparisonFailure(std::string key, std::string detail, std::size_t index)
+            : std::runtime_error("step=" + std::to_string(index + 1) + " " + key),
+              signature(std::move(key)), report(std::move(detail)), step(index) {}
+    };
+    CommandResult compare_command(CheckedOrderBook& book, ReferenceBook& reference,
+                                  const Command& command, std::size_t step,
+                                  TestFault fault = TestFault::None) {
+        const auto before = book.snapshot();
+        const auto expected = run_command(reference, command);
+        CommandResult actual;
+        auto fail = [&](std::string kind, const std::string& detail = "") -> void {
+            std::ostringstream report;
+            report << "mismatch=" << kind << " command=" << step + 1 << "\n" << detail << '\n';
+            report << "EXPECTED RESULT\n";
+            test_trace::describe(report, expected);
+            report << "ACTUAL RESULT\n";
+            test_trace::describe(report, actual);
+            report << "BEFORE SNAPSHOT\n";
+            test_trace::describe(report, before);
+            report << "EXPECTED SNAPSHOT\n";
+            test_trace::describe(report, reference.snapshot());
+            report << "ACTUAL SNAPSHOT\n";
+            try { test_trace::describe(report, book.snapshot()); }
+            catch (const std::exception& error) { report << "unavailable: " << error.what() << '\n'; }
+            const auto signature = std::string(test_trace::name(command.action)) + ":" + kind
+                + (detail.empty() ? "" : ":" + detail);
+            throw ComparisonFailure(signature,
+                                    report.str(), step);
+        };
+        try { actual = run_command(book, command); }
+        catch (const std::exception& error) { fail("engine.exception", error.what()); }
+        // Deliberate test-only mutation: simulate an incorrect execution price.
+        if (fault == TestFault::TradePrice && !actual.trades.empty()) ++actual.trades.front().price;
+        if (actual.rejected != expected.rejected) fail("rejection");
+        if (actual.canceled != expected.canceled) fail("cancellation");
+        if (actual.trades.size() != expected.trades.size()) fail("trade.count");
+        for (std::size_t i = 0; i < expected.trades.size(); ++i) {
+            const auto& a = actual.trades[i];
+            const auto& e = expected.trades[i];
+            if (a.buy_id != e.buy_id || a.sell_id != e.sell_id) fail("trade.ids");
+            if (a.price != e.price) fail("trade.price");
+            if (a.quantity != e.quantity) fail("trade.quantity");
         }
-        catch (const std::exception &error)
-        {
-            throw std::runtime_error("step=" + std::to_string(step) + " action=" + std::to_string(static_cast<int>(command.action)) + " id=" + std::to_string(command.id) + " side=" + std::to_string(static_cast<int>(command.side)) + " price=" + std::to_string(command.price) + " qty=" + std::to_string(command.quantity) + ": " + error.what());
+        try { check_observable_state(book, reference); }
+        catch (const std::exception& error) { fail("state", error.what()); }
+        if (actual.rejected || (command.action == Action::Cancel && !actual.canceled)) {
+            try { check_snapshot(book.snapshot(), before); }
+            catch (const std::exception& error) { fail("rejection.mutated", error.what()); }
+        }
+        return actual;
+    }
+
+    std::optional<ComparisonFailure> replay_failure(const std::vector<Command>& commands,
+                                                   TestFault fault = TestFault::None) {
+        CheckedOrderBook book;
+        ReferenceBook reference;
+        for (std::size_t step = 0; step < commands.size(); ++step) {
+            try { compare_command(book, reference, commands[step], step, fault); }
+            catch (const ComparisonFailure& failure) { return failure; }
+        }
+        return std::nullopt;
+    }
+
+    std::filesystem::path save_failure(const std::vector<Command>& commands,
+                                      const ComparisonFailure& failure, const std::string& label,
+                                      TestFault fault = TestFault::None) {
+        const std::filesystem::path directory(TEST_TRACE_OUTPUT_DIR);
+        std::filesystem::create_directories(directory);
+        const auto path = directory / (label + ".trace");
+        test_trace::save(path, commands);
+        std::ofstream report(path.string() + ".report.txt");
+        if (!report) throw std::runtime_error("Cannot create failure report");
+        report << "context=" << label << "\ncompiler=" << __VERSION__
+               << "\ncplusplus=" << __cplusplus << "\ninitial=empty\nprice_limit=" << max_price
+               << "\nquantity_limit=" << max_quantity << "\ninjected_price_error="
+               << (fault == TestFault::TradePrice) << '\n';
+#ifdef NDEBUG
+        report << "NDEBUG=1\n";
+#else
+        report << "NDEBUG=0\n";
+#endif
+#ifdef _GLIBCXX_DEBUG
+        report << "GLIBCXX_DEBUG=1\n";
+#else
+        report << "GLIBCXX_DEBUG=0\n";
+#endif
+        report << "signature=" << failure.signature << '\n' << failure.report;
+        report.flush();
+        if (!report) throw std::runtime_error("Cannot write failure report");
+        return path;
+    }
+
+    struct TraceSession {
+        std::string label;
+        std::vector<Command> commands;
+        explicit TraceSession(std::string context) : label(std::move(context)) {}
+        CommandResult compare(CheckedOrderBook& book, ReferenceBook& reference, const Command& command,
+                              TestFault fault = TestFault::None) {
+            commands.push_back(command);
+            try { return compare_command(book, reference, command, commands.size() - 1, fault); }
+            catch (const ComparisonFailure& failure) {
+                const auto path = save_failure(commands, failure, label, fault);
+                throw std::runtime_error(std::string(failure.what()) + " saved=" + path.string());
+            }
+        }
+    };
+    void differential(std::uint64_t seed, bool shuffled) {
+        constexpr int events = 400;
+        std::mt19937_64 rng(seed);
+        std::vector<OrderId> ids(events);
+        std::iota(ids.begin(), ids.end(), OrderId{1});
+        if (shuffled) std::shuffle(ids.begin(), ids.end(), rng);
+        std::vector<OrderId> submitted;
+        CheckedOrderBook actual;
+        ReferenceBook reference;
+        TraceSession trace("limit-cancel-" + std::to_string(seed) + (shuffled ? "-shuffled" : "-ordered"));
+        Quantity accepted = 0, executed = 0, canceled = 0;
+        std::size_t next = 0;
+        for (int event = 0; event < events; ++event) {
+            if (!submitted.empty() && rng() % 100 < 35) {
+                const OrderId id = rng() % 5 == 0 ? 999'999 : submitted[rng() % submitted.size()];
+                const auto found = std::find_if(reference.resting.begin(), reference.resting.end(),
+                    [id](const Order& item) { return item.id == id; });
+                if (found != reference.resting.end()) canceled += found->quantity;
+                trace.compare(actual, reference, {Action::Cancel, id, Side::Buy, 0, 0});
+            } else {
+                const auto incoming = order(ids[next++], rng() % 2 ? Side::Buy : Side::Sell,
+                    95 + static_cast<Price>(rng() % 11), 1 + static_cast<Quantity>(rng() % 20));
+                submitted.push_back(incoming.id);
+                const auto result = trace.compare(actual, reference,
+                    {Action::Limit, incoming.id, incoming.side, incoming.price, incoming.quantity});
+                accepted += incoming.quantity;
+                for (const auto& trade : result.trades) executed += trade.quantity;
+            }
+            Quantity resting = 0;
+            for (const auto& item : reference.resting) { CHECK(item.quantity > 0); resting += item.quantity; }
+            CHECK(accepted == 2 * executed + canceled + resting);
         }
     }
     TEST_CASE(lesson6_saved_mixed_command_fixture)
@@ -1390,9 +1465,10 @@ namespace
                                                     {Action::Cancel, 1, Side::Buy, 0, 0}}};
         CheckedOrderBook book;
         ReferenceBook reference;
+        TraceSession trace("saved-mixed-fixture");
         for (std::size_t i = 0; i < commands.size(); ++i)
         {
-            const auto result = compare_command(book, reference, commands[i], i);
+            const auto result = trace.compare(book, reference, commands[i]);
             CHECK(result.rejected == (i == 5 || i == 15 || i == 16));
             CHECK(result.canceled == (i == 7 || i == 9 || i == 19));
             std::vector<Trade> expected;
@@ -1491,9 +1567,10 @@ namespace
         CheckedOrderBook book;
         ReferenceBook reference;
         std::mt19937_64 rng(seed);
+        TraceSession trace("mixed-" + std::to_string(seed));
         for (std::size_t step = 0; step < 1000; ++step)
         {
-            Command command{static_cast<Action>(rng() % 3), 1 + rng() % 20,
+            Command command{static_cast<Action>(rng() % 4), 1 + rng() % 20,
                             rng() % 2 ? Side::Buy : Side::Sell,
                             97 + static_cast<Price>(rng() % 7), 1 + rng() % 12};
             switch (rng() % 16)
@@ -1524,7 +1601,14 @@ namespace
             }
             try
             {
-                compare_command(book, reference, command, step);
+                if ((command.action == Action::Amend || command.action == Action::Cancel)
+                    && !reference.resting.empty() && rng() % 4 != 0) {
+                    const auto& target = reference.resting[rng() % reference.resting.size()];
+                    command.id = target.id;
+                    if (command.action == Action::Amend && rng() % 2 == 0)
+                        command.price = target.price;
+                }
+                trace.compare(book, reference, command);
             }
             catch (const std::exception &error)
             {
@@ -1561,13 +1645,14 @@ namespace
                 CheckedOrderBook book;
                 ReferenceBook reference;
                 auto digits = trace;
+                TraceSession journal("exhaustive-" + std::to_string(length) + "-" + std::to_string(trace));
                 for (std::size_t step = 0; step < length; ++step)
                 {
                     const auto &command = alphabet[digits % alphabet.size()];
                     digits /= alphabet.size();
                     try
                     {
-                        compare_command(book, reference, command, step);
+                        journal.compare(book, reference, command);
                     }
                     catch (const std::exception &error)
                     {
@@ -2367,16 +2452,248 @@ TEST_CASE(amend_repeated_changes_account_for_quantity_and_retain_id_ownership) {
         const std::int64_t accepted = 10 + 5 + 4;
         const std::int64_t adjustment = 2 - 5 + 1;
         const std::int64_t executed = 4;
-        CHECK(accepted + adjustment == 2 * executed + 9);
+        std::int64_t remaining = 0;
+        const auto snapshot = book.snapshot();
+        for (const auto& level : snapshot.bids) remaining += static_cast<std::int64_t>(level.quantity);
+        for (const auto& level : snapshot.asks) remaining += static_cast<std::int64_t>(level.quantity);
+        CHECK(accepted + adjustment == 2 * executed + remaining);
         check_trades(book.submit(order(4, opposite(side), 100, 9)), {
             execution(opposite(side), 4, 2, 100, 5), execution(opposite(side), 4, 1, 100, 4)});
         check_snapshot(book.snapshot(), Snapshot{});
         CHECK(OrderBookTestAccess::ids(book).empty());
     }
 }
+TEST_CASE(amend_heavy_differential_seeded_streams) {
+    for (std::uint64_t seed : {8u, 491u, 2026u}) {
+        CheckedOrderBook book;
+        ReferenceBook reference;
+        std::mt19937_64 rng(seed);
+        TraceSession trace("amend-heavy-" + std::to_string(seed));
+        std::array<std::size_t, 5> outcomes{}; // no-op, reduction, increase, reprice, rejection
+        OrderId nextId = 1;
+        try {
+            for (std::size_t step = 0; step < 1500; ++step) {
+                const auto choice = rng() % 10;
+                Command command{Action::Limit, nextId++, rng() % 2 ? Side::Buy : Side::Sell,
+                                97 + static_cast<Price>(rng() % 7), 1 + rng() % 20};
+                int category = -1;
+                if (!reference.resting.empty()) {
+                    const Order target = reference.resting[rng() % reference.resting.size()];
+                    if (choice < 6) {
+                        command = {Action::Amend, target.id, target.side, target.price, target.quantity};
+                        switch (rng() % 8) {
+                        case 0: category = 0; break;
+                        case 1:
+                            command.quantity = target.quantity > 1 ? target.quantity - 1 : 1;
+                            category = target.quantity > 1 ? 1 : 0;
+                            break;
+                        case 2: command.quantity = target.quantity + 1; category = 2; break;
+                        case 3:
+                            command.price = target.price == 103 ? 97 : target.price + 1;
+                            command.quantity = 1 + rng() % 20;
+                            category = 3;
+                            break;
+                        case 4: command.quantity = 0; category = 4; break;
+                        case 5: command.quantity = max_quantity + 1; category = 4; break;
+                        case 6: command.price = max_price + 1; category = 4; break;
+                        case 7: command.id = nextId++; category = 4; break;
+                        }
+                    } else if (choice == 6) {
+                        command.action = Action::Cancel;
+                        command.id = target.id;
+                    } else if (choice == 7) {
+                        command.action = Action::Market;
+                    }
+                }
+                trace.compare(book, reference, command);
+                if (category >= 0) ++outcomes[static_cast<std::size_t>(category)];
+            }
+            for (const auto count : outcomes) CHECK(count > 0);
+        } catch (const std::exception& error) {
+            throw std::runtime_error("amend seed=" + std::to_string(seed) + " " + error.what());
+        }
+    }
+}
+TEST_CASE(amend_level_totals_can_exceed_individual_quantity_limit) {
+    for (Side side : sides) {
+        CheckedOrderBook book;
+        book.submit(order(1, side, 100, max_quantity));
+        book.submit(order(2, side, 100, 1));
+        CHECK(book.amend(2, 100, max_quantity).empty());
+        Snapshot expected;
+        (side == Side::Buy ? expected.bids : expected.asks).push_back(
+            {100, 2 * max_quantity, {{1, side, 100, max_quantity, 1},
+                                   {2, side, 100, max_quantity, 3}}});
+        check_snapshot(book.snapshot(), expected);
+        CHECK(book.amend(1, 100, 1).empty());
+        check_trades(book.submit(order(3, opposite(side), 100, 2)), {
+            execution(opposite(side), 3, 1, 100, 1), execution(opposite(side), 3, 2, 100, 1)});
+        CHECK(book.cancel(2));
+        check_snapshot(book.snapshot(), Snapshot{});
+    }
+}
+TEST_CASE(trace_round_trip_preserves_invalid_fields_and_full_numeric_ranges) {
+    const std::vector<Command> commands{
+        {Action::Limit, std::numeric_limits<OrderId>::max(), Side::Sell, max_price, max_quantity},
+        {Action::Amend, 0, static_cast<Side>(-1), std::numeric_limits<Price>::min(),
+         std::numeric_limits<Quantity>::max()},
+        {Action::Market, 2, static_cast<Side>(99), std::numeric_limits<Price>::max(), 0},
+        {Action::Cancel, 2, Side::Buy, -1, 9}};
+    std::ostringstream encoded;
+    test_trace::write(encoded, commands);
+    for (bool crlf : {false, true}) {
+        std::string text;
+        for (char c : encoded.str()) { if (crlf && c == '\n') text += '\r'; text += c; }
+        std::istringstream input(text + "\n");
+        const auto decoded = test_trace::read(input);
+        std::ostringstream reencoded;
+        test_trace::write(reencoded, decoded);
+        CHECK(encoded.str() == reencoded.str());
+    }
+}
+
+TEST_CASE(trace_parser_rejects_malformed_files_before_execution) {
+    const std::string header = "LOB-TEST-TRACE 1\nINITIAL EMPTY\nLIMITS 1000000000 1000000000\n";
+    for (const std::string& text : std::vector<std::string>{
+        "", "LOB-TEST-TRACE 2\n", "LOB-TEST-TRACE 1\nINITIAL RESTORED\n",
+        header + "0 NEW 1 0 100 1\n", header + "2 NEW 1 0 100 1\n",
+        header + "1 NEW 1 0 100 1\n1 CANCEL 1 0 0 0\n",
+        header + "1 UNKNOWN 1 0 100 1\n", header + "1 NEW 1 0 100\n",
+        header + "1 NEW 1 0 100 1 extra\n", header + "1 NEW -1 0 100 1\n",
+        header + "1 NEW 18446744073709551616 0 100 1\n",
+        header + "1 NEW 1 0 9223372036854775808 1\n",
+        header + "1 NEW 1 0 100 1junk\n"}) {
+        bool rejected = false;
+        try { std::istringstream input(text); (void)test_trace::read(input); }
+        catch (const std::runtime_error&) { rejected = true; }
+        CHECK(rejected);
+    }
+    try {
+        std::istringstream input(header + "1 NEW 1 0 100 1 extra\n");
+        (void)test_trace::read(input);
+        CHECK(false);
+    } catch (const std::runtime_error& error) {
+        CHECK(std::string(error.what()).find("line 4") != std::string::npos);
+    }
+}
+
+TEST_CASE(trace_captures_first_failure_and_replays_without_generator) {
+    const auto commands = test_trace::load(std::filesystem::path(TEST_FIXTURE_DIR) / "trade_price_original.trace");
+    CheckedOrderBook book;
+    ReferenceBook reference;
+    TraceSession trace("capture-self-test");
+    bool caught = false;
+    try {
+        for (const auto& command : commands) trace.compare(book, reference, command, TestFault::TradePrice);
+        trace.compare(book, reference, {Action::Cancel, 11, Side::Buy, 0, 0}, TestFault::TradePrice);
+    } catch (const std::runtime_error& error) {
+        CHECK(std::string(error.what()).find("NEW:trade.price") != std::string::npos);
+        caught = true;
+    }
+    CHECK(caught);
+    const auto path = std::filesystem::path(TEST_TRACE_OUTPUT_DIR) / "capture-self-test.trace";
+    const auto saved = test_trace::load(path);
+    CHECK(saved.size() == 6); // No later CANCEL is recorded after the first mismatch.
+    const auto failure = replay_failure(saved, TestFault::TradePrice);
+    CHECK(failure && failure->signature == "NEW:trade.price" && failure->step == 5);
+    CHECK(!replay_failure(saved)); // The real engine remains unmodified.
+    std::ifstream reportFile(path.string() + ".report.txt");
+    const std::string report((std::istreambuf_iterator<char>(reportFile)), std::istreambuf_iterator<char>());
+    for (const char* expected : {"initial=empty", "compiler=", "EXPECTED RESULT", "ACTUAL RESULT",
+                                 "BEFORE SNAPSHOT", "EXPECTED SNAPSHOT", "ACTUAL SNAPSHOT"})
+        CHECK(report.find(expected) != std::string::npos);
+}
+
+TEST_CASE(trace_minimizer_preserves_failure_and_simplifies_fields) {
+    const auto commands = test_trace::load(std::filesystem::path(TEST_FIXTURE_DIR) / "trade_price_original.trace");
+    const auto original = replay_failure(commands, TestFault::TradePrice);
+    CHECK(original);
+    auto sameFailure = [&](const std::vector<Command>& candidate) {
+        const auto failure = replay_failure(candidate, TestFault::TradePrice);
+        return failure && failure->signature == original->signature;
+    };
+    const auto reduced = test_trace::minimize(commands, sameFailure);
+    CHECK(reduced.size() == 2);
+    const auto fixture = test_trace::load(std::filesystem::path(TEST_FIXTURE_DIR) / "trade_price_minimized.trace");
+    std::ostringstream actual, expected;
+    test_trace::write(actual, reduced);
+    test_trace::write(expected, fixture);
+    CHECK(actual.str() == expected.str());
+    for (std::size_t i = 0; i < reduced.size(); ++i) {
+        std::vector<Command> candidate;
+        for (std::size_t j = 0; j < reduced.size(); ++j)
+            if (j != i) candidate.push_back(reduced[j]);
+        CHECK(!sameFailure(candidate));
+    }
+    CHECK(!replay_failure(reduced));
+}
+
+TEST_CASE(replay_minimized_trade_price_regression) {
+    const auto commands = test_trace::load(std::filesystem::path(TEST_FIXTURE_DIR) / "trade_price_minimized.trace");
+    // Pin literal output too, so agreement between two implementations is insufficient.
+    for (int repetition = 0; repetition < 2; ++repetition) {
+        CheckedOrderBook book;
+        CHECK(run_command(book, commands.at(0)).trades.empty());
+        const auto result = run_command(book, commands.at(1));
+        CHECK(!result.rejected);
+        check_trades(result.trades, {{2, 1, 1, 1}});
+        check_snapshot(book.snapshot(), Snapshot{});
+        CHECK(!replay_failure(commands));
+    }
+    const auto injected = replay_failure(commands, TestFault::TradePrice);
+    CHECK(injected && injected->signature == "NEW:trade.price");
+}
+
+int trace_cli(int argc, char** argv) {
+    const std::string_view mode(argv[1]);
+    const bool minimize = mode == "--minimize";
+    const int required = minimize ? 4 : 3;
+    if (argc < required || argc > required + 1 ||
+        (argc == required + 1 && std::string_view(argv[required]) != "--inject-price-error"))
+        throw std::runtime_error("Usage: order_book_tests --replay INPUT [--inject-price-error]\n"
+                                 "       order_book_tests --minimize INPUT OUTPUT [--inject-price-error]");
+    const auto fault = argc == required + 1 ? TestFault::TradePrice : TestFault::None;
+    const auto commands = test_trace::load(argv[2]);
+    const auto failure = replay_failure(commands, fault);
+    if (!minimize) {
+        if (failure) {
+            std::cerr << failure->what() << '\n' << failure->report;
+            return 1;
+        }
+        std::cout << "PASS replay: " << commands.size() << " commands, matching results and snapshots\n";
+        return 0;
+    }
+    if (!failure) throw std::runtime_error("No mismatch to minimize");
+    const auto input = std::filesystem::weakly_canonical(argv[2]);
+    const auto output = std::filesystem::weakly_canonical(argv[3]);
+    if (input == output || (std::filesystem::exists(output) && std::filesystem::equivalent(input, output)))
+        throw std::runtime_error("Choose a different output file to preserve the original trace");
+    auto prefix = commands;
+    prefix.resize(failure->step + 1);
+    const auto reduced = test_trace::minimize(prefix, [&](const std::vector<Command>& candidate) {
+        const auto result = replay_failure(candidate, fault);
+        return result && result->signature == failure->signature;
+    });
+    test_trace::save(output, reduced);
+    const auto verified = replay_failure(test_trace::load(output), fault);
+    if (!verified || verified->signature != failure->signature)
+        throw std::runtime_error("Saved minimized trace did not reproduce the original mismatch");
+    std::ofstream report(output.string() + ".report.txt");
+    report << "signature=" << verified->signature << "\ninjected_price_error="
+           << (fault == TestFault::TradePrice) << '\n' << verified->report;
+    report.flush();
+    if (!report) throw std::runtime_error("Cannot write minimized failure report");
+    std::cout << "Reduced " << commands.size() << " to " << reduced.size()
+              << " commands; preserved " << verified->signature << '\n';
+    return 0;
+}
 } // namespace
 int main(int argc, char **argv)
 {
+    if (argc >= 2 && (std::string_view(argv[1]) == "--replay" || std::string_view(argv[1]) == "--minimize")) {
+        try { return trace_cli(argc, argv); }
+        catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--list")
     {
         for (const auto &item : cases())

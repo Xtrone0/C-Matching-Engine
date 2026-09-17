@@ -232,7 +232,7 @@ std::vector<Trade> OrderBook::amend(
     Price newPrice,
     Quantity newRemaining)
 {
-    if (order.quantity == 0 or order.quantity > 1'000'000'000)
+    if (newRemaining == 0 or newRemaining > 1'000'000'000)
         throw std::invalid_argument("Quantity out of range");
 
     if (not active.contains(id))

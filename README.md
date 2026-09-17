@@ -5,11 +5,11 @@ C++23 limit order book with price-time-priority matching.
 - Limit and market orders, partial fills, and multi-level matching.
 - FIFO within each price level.
 - Indexed cancellation using stored level and order iterators.
+- Amendments with priority-preserving reductions and priority-losing replacements.
 - Owned snapshots, input validation, and invariant checking.
 
 See [build instructions](docs/building.md), [test coverage](tests/README.md),
 and [benchmark commands and methodology](benchmarks/README.md).
-Amendments are not yet implemented.
 
 ## Repository structure
 

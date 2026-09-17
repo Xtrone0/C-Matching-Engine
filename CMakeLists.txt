@@ -53,6 +53,9 @@ add_executable(order_book_tests
 target_link_libraries(order_book_tests PRIVATE
     order_book
 )
+target_compile_definitions(order_book_tests PRIVATE
+    TEST_TRACE_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-failures"
+    TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
 enable_warnings(order_book_tests)
 
@@ -63,7 +66,7 @@ enable_testing()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     tests/order_book_test.cpp)
 file(STRINGS tests/order_book_test.cpp test_case_declarations
-    REGEX "^TEST_CASE\\([a-zA-Z0-9_]+\\)")
+    REGEX "^[ \t]*TEST_CASE\\([a-zA-Z0-9_]+\\)")
 
 foreach(declaration IN LISTS test_case_declarations)
     string(REGEX MATCH "TEST_CASE\\(([a-zA-Z0-9_]+)\\)" unused "${declaration}")
