@@ -44,7 +44,7 @@ target_include_directories(order_book PUBLIC
 enable_warnings(order_book)
 
 # --------------------
-# Tests + benchmark
+# Tests
 # --------------------
 add_executable(order_book_tests
     tests/order_book_test.cpp
@@ -70,6 +70,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     tests/order_book_edge_cases.cpp)
 file(STRINGS tests/order_book_edge_cases.cpp edge_case_declarations
     REGEX "^TEST_CASE\\([a-zA-Z0-9_]+\\)")
+
 foreach(declaration IN LISTS edge_case_declarations)
     string(REGEX MATCH "TEST_CASE\\(([a-zA-Z0-9_]+)\\)" unused "${declaration}")
     set(case_name "${CMAKE_MATCH_1}")
@@ -78,3 +79,8 @@ foreach(declaration IN LISTS edge_case_declarations)
         SKIP_RETURN_CODE 77
         TIMEOUT 20)
 endforeach()
+
+# Timing benchmarks run separately from correctness tests and CTest.
+add_executable(order_book_benchmark benchmarks/order_book_benchmark.cpp)
+target_link_libraries(order_book_benchmark PRIVATE order_book)
+enable_warnings(order_book_benchmark)

@@ -10,12 +10,14 @@ ctest --test-dir build -R 'edge\.(lesson6|invariants)' --output-on-failure
 ```
 
 Each `edge.*` case runs in its own process with a 20-second timeout. The original
-scenario suite remains in `order_book_tests`, followed by a small benchmark.
+scenario suite remains in `order_book_tests`. Timing benchmarks run separately
+from [the benchmarks folder](../benchmarks/README.md).
 Both executables link the production `order_book` library.
 
 ## Verification
 
-On 2026-09-17, **104 tests passed, none failed, and none skipped** in each of:
+On 2026-09-17, after adding the Lesson 7 location regressions, **110 tests passed,
+8 failed, and none skipped** in each of:
 
 - Debug: `build`
 - Release, with `NDEBUG`: `build/release`
@@ -23,7 +25,11 @@ On 2026-09-17, **104 tests passed, none failed, and none skipped** in each of:
 
 The checker uses explicit `std::logic_error` conditions and stays active in
 Release. There is no `NDEBUG` skip. CTest reports are saved as
-`lesson6-results.xml` inside each build directory.
+`lesson7-results.xml` inside each build directory. All 104 previous tests and six
+new location lifecycle tests pass. The eight `locations_checker_rejects_*` tests
+fail because the production checker currently checks active keys but not stored
+`Location` values. These are real missing checks, not skipped or expected-pass
+tests; the full suite is not green until location validation is implemented.
 
 ## Checking every scenario operation
 
@@ -64,7 +70,32 @@ to compare. It does not mutate the book or advance arrival priority.
 `order_book_test_access.hpp` defines the book's narrow test friend. It lets tests
 construct corrupt states and call the private checked-add helper without unsafe
 layout casts or redefining `private`. Tests require the expected logic-error
-message, so a different failing check cannot silently satisfy them.
+message, so a different failing check cannot silently satisfy them. The new
+location rejection tests allow any `std::logic_error` wording: they change only
+one stored location (or swap two locations), while orders and index keys remain
+valid.
+
+## Lesson 7 location regressions
+
+Run the new tests with `ctest --test-dir build -R 'edge\.locations_' --output-on-failure`.
+Repeat with `build/release` and `build/checked` for the other configurations.
+
+- Verify the exact registered level and order nodes on both sides.
+- Cancel head/middle/tail nodes, preserve survivor addresses and priorities,
+  and then cancel through every surviving location.
+- Keep partially filled makers at the same node; remove fully filled makers;
+  register limit residuals and never register expired market residuals.
+- Recreate levels, reuse IDs on the opposite side, and preserve locations across
+  additional map insertions and a forced active-index rehash.
+- Require the invariant checker to reject wrong/invalid sides, level iterators
+  into another level or side, order iterators into another order/level/side,
+  and swapped complete locations.
+
+Corruption tests substitute valid iterators to live nodes. They do not dereference
+intentionally dangling or end iterators. Node-address comparisons permit checking
+wrong-container locations without comparing iterators from different containers.
+The Checked configuration additionally exercises iterator lifetimes during the
+normal lifecycle tests.
 
 Testing aggregate overflow with legal billion-unit orders would require billions
 of nodes. The arithmetic-boundary tests therefore call the exact helper used by
@@ -101,8 +132,8 @@ submissions return a trade vector, possibly empty. Unknown cancellations return
 Prices and individual quantities are in `1..1,000,000,000`; IDs are in
 `1..UINT64_MAX` and unique only while resting. Negative text must be rejected by
 future parsing before conversion to unsigned quantities. Aggregate quantities may
-exceed the per-order bound. Amendments and indexed-locator validation belong to
-later lessons and are not yet implemented by this suite.
+exceed the per-order bound. Amendments remain future work. Location validation
+now has regression tests but is not yet implemented in the production checker.
 
 The richer workbook command-result interface is deferred by agreement. Market,
 depth, and invariant adapters retain missing-API skip support, but no current case

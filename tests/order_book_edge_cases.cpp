@@ -8,6 +8,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -1375,10 +1376,15 @@ TEST_CASE(invariants_reject_missing_active_ids) {
 }
 TEST_CASE(invariants_reject_stale_active_ids) {
     CheckedOrderBook empty;
-    OrderBookTestAccess::ids(empty).insert(999);
+    // No order owns this extra key. The checker rejects the key-set mismatch
+    // without dereferencing the placeholder location.
+    OrderBookTestAccess::ids(empty).emplace(999, Location{});
     expect_logic_error([&] { empty.assert_invariants(); }, "Active ID index disagrees with book");
     invalid_book_both_sides([](auto& book, Side) {
-        OrderBookTestAccess::ids(book).insert(999);
+        auto& active = OrderBookTestAccess::ids(book);
+        // Valid iterators, but an extra key with no corresponding resting ID.
+        const Location existing = active.at(1);
+        active.emplace(999, existing);
     }, "Active ID index disagrees with book");
 }
 TEST_CASE(invariants_reject_zero_priority) {
@@ -1484,6 +1490,206 @@ TEST_CASE(invariants_accept_valid_lifecycle_after_every_command) {
     CHECK(book.cancel(1)); invariants(book);
     CHECK(book.cancel(5)); invariants(book);
     check_empty(book);
+}
+
+// Compare node addresses, not iterators from potentially different containers.
+// All deliberately substituted iterators below refer to live nodes.
+void check_location(OrderBook& book, OrderId id, Side side, Price p,
+                    std::size_t offset = 0) {
+    const auto& location = OrderBookTestAccess::ids(book).at(id);
+    CHECK(location.side == side);
+    CHECK(location.level->first == p);
+    CHECK(std::addressof(location.level->second) ==
+          std::addressof(OrderBookTestAccess::orders(book, side, p)));
+    CHECK(std::addressof(*location.order) ==
+          std::addressof(OrderBookTestAccess::order(book, side, p, offset)));
+    CHECK(location.order->id == id);
+}
+
+TEST_CASE(locations_register_exact_nodes_on_both_sides) {
+    CheckedOrderBook book;
+    for (Side side : sides) {
+        const Price p = side == Side::Buy ? 90 : 110;
+        const OrderId base = side == Side::Buy ? 10 : 20;
+        book.submit(order(base, side, p, 5));
+        book.submit(order(base + 1, side, p, 7));
+        book.submit(order(base + 2, side, p + 1, 9));
+        check_location(book, base, side, p);
+        check_location(book, base + 1, side, p, 1);
+        check_location(book, base + 2, side, p + 1);
+    }
+    CHECK(OrderBookTestAccess::ids(book).size() == 6);
+}
+
+TEST_CASE(locations_cancel_preserves_survivor_nodes_both_sides) {
+    for (Side side : sides) {
+        for (OrderId removed : {OrderId{1}, OrderId{2}, OrderId{3}}) {
+            CheckedOrderBook book;
+            for (OrderId id = 1; id <= 4; ++id)
+                book.submit(order(id, side, id == 4 ? 101 : 100, id));
+            const auto before = book.snapshot();
+            const auto saved = OrderBookTestAccess::ids(book);
+            CHECK(!book.cancel(999));
+            check_snapshot(book.snapshot(), before);
+            CHECK(book.cancel(removed));
+            CHECK(!OrderBookTestAccess::ids(book).contains(removed));
+            std::size_t offset = 0;
+            for (OrderId id = 1; id <= 4; ++id) {
+                if (id == removed) continue;
+                check_location(book, id, side, id == 4 ? 101 : 100,
+                               id == 4 ? 0 : offset++);
+                const auto& now = OrderBookTestAccess::ids(book).at(id);
+                CHECK(std::addressof(*now.level) == std::addressof(*saved.at(id).level));
+                CHECK(std::addressof(*now.order) == std::addressof(*saved.at(id).order));
+                CHECK(now.order->priority == id);
+            }
+            // Erase through every surviving locator, including the other level.
+            for (OrderId id = 1; id <= 4; ++id)
+                if (id != removed) CHECK(book.cancel(id));
+            CHECK(OrderBookTestAccess::ids(book).empty());
+            check_empty(book);
+        }
+    }
+}
+
+TEST_CASE(locations_partial_fill_keeps_maker_node_both_sides) {
+    for (Side side : sides) {
+        CheckedOrderBook book;
+        book.submit(order(1, side, 100, 5));
+        book.submit(order(2, side, 100, 7));
+        const Location saved = OrderBookTestAccess::ids(book).at(1);
+        check_trades(book.submit(order(3, opposite(side), 100, 2)),
+                     {execution(opposite(side), 3, 1, 100, 2)});
+        check_location(book, 1, side, 100);
+        CHECK(std::addressof(*OrderBookTestAccess::ids(book).at(1).order) ==
+              std::addressof(*saved.order));
+        CHECK(saved.order->quantity == 3);
+        CHECK(saved.order->priority == 1);
+        CHECK(!OrderBookTestAccess::ids(book).contains(3));
+        CHECK(book.cancel(1));
+        check_location(book, 2, side, 100);
+        CHECK(book.cancel(2));
+        check_empty(book);
+    }
+}
+
+TEST_CASE(locations_sweep_removes_makers_and_registers_only_residual) {
+    for (Side taker : sides) {
+        for (bool market : {false, true}) {
+            CheckedOrderBook book;
+            book.submit(order(1, opposite(taker), price(taker, 0), 2));
+            book.submit(order(2, opposite(taker), price(taker, 1), 3));
+            const auto trades = market ? book.submit_market(3, taker, 7)
+                : book.submit(order(3, taker, price(taker, 2), 7));
+            check_trades(trades, {execution(taker, 3, 1, price(taker, 0), 2),
+                                  execution(taker, 3, 2, price(taker, 1), 3)});
+            CHECK(!OrderBookTestAccess::ids(book).contains(1));
+            CHECK(!OrderBookTestAccess::ids(book).contains(2));
+            CHECK(!book.cancel(1));
+            CHECK(!book.cancel(2));
+            if (market) {
+                CHECK(OrderBookTestAccess::ids(book).empty());
+                CHECK(!book.cancel(3));
+            } else {
+                CHECK(OrderBookTestAccess::ids(book).size() == 1);
+                check_location(book, 3, taker, price(taker, 2));
+                CHECK(OrderBookTestAccess::ids(book).at(3).order->quantity == 2);
+                CHECK(book.cancel(3));
+            }
+            check_empty(book);
+        }
+    }
+}
+
+TEST_CASE(locations_recreate_level_and_reuse_id_on_opposite_side) {
+    for (Side side : sides) {
+        CheckedOrderBook book;
+        for (int repeat = 0; repeat < 10; ++repeat) {
+            book.submit(order(1, side, 100, 2));
+            check_location(book, 1, side, 100);
+            CHECK(book.cancel(1));
+            CHECK(OrderBookTestAccess::ids(book).empty());
+            book.submit(order(1, opposite(side), 100, 3));
+            check_location(book, 1, opposite(side), 100);
+            book.submit_market(2, side, 3);
+            CHECK(OrderBookTestAccess::ids(book).empty());
+            check_empty(book);
+        }
+    }
+}
+
+TEST_CASE(locations_survive_index_rehash_and_map_insertions) {
+    for (Side side : sides) {
+        CheckedOrderBook book;
+        book.submit(order(1, side, 100, 5));
+        const Location saved = OrderBookTestAccess::ids(book).at(1);
+        for (OrderId id = 2; id <= 128; ++id)
+            book.submit(order(id, side, 100 + static_cast<Price>(id % 8), 1));
+        auto& active = OrderBookTestAccess::ids(book);
+        const auto old_buckets = active.bucket_count();
+        active.rehash(old_buckets * 4);
+        CHECK(active.bucket_count() > old_buckets);
+        book.assert_invariants();
+        check_location(book, 1, side, 100);
+        CHECK(std::addressof(*active.at(1).level) == std::addressof(*saved.level));
+        CHECK(std::addressof(*active.at(1).order) == std::addressof(*saved.order));
+        // Cancel all nodes in a reproducible shuffled order after rehash.
+        std::vector<OrderId> ids(128);
+        std::iota(ids.begin(), ids.end(), OrderId{1});
+        std::mt19937 random(7);
+        std::shuffle(ids.begin(), ids.end(), random);
+        for (OrderId id : ids) CHECK(book.cancel(id));
+        CHECK(active.empty());
+        check_empty(book);
+    }
+}
+
+// These tests require number two: checking stored Location values. Only a
+// location is corrupted; the orders, active keys, and snapshot stay valid.
+// Exception wording is deliberately not part of this internal contract.
+template<class Corrupt>
+void reject_bad_location(Corrupt corrupt) {
+    for (Side side : sides) {
+        CheckedOrderBook book;
+        const Price p = side == Side::Buy ? 90 : 110;
+        book.submit(order(1, side, p, 5));
+        book.submit(order(2, side, p, 7));
+        book.submit(order(3, side, p + 1, 9));
+        book.submit(order(4, opposite(side), side == Side::Buy ? 120 : 80, 11));
+        const auto before = book.snapshot();
+        corrupt(OrderBookTestAccess::ids(book), side);
+        bool rejected = false;
+        try { book.assert_invariants(); }
+        catch (const std::logic_error&) { rejected = true; }
+        check_snapshot(book.snapshot(), before);
+        if (!rejected)
+            throw std::runtime_error("Invariant checker accepted a corrupted Location");
+    }
+}
+
+TEST_CASE(locations_checker_rejects_wrong_side) {
+    reject_bad_location([](auto& active, Side side) { active.at(1).side = opposite(side); });
+}
+TEST_CASE(locations_checker_rejects_invalid_side) {
+    reject_bad_location([](auto& active, Side) { active.at(1).side = static_cast<Side>(99); });
+}
+TEST_CASE(locations_checker_rejects_other_level_same_side) {
+    reject_bad_location([](auto& active, Side) { active.at(1).level = active.at(3).level; });
+}
+TEST_CASE(locations_checker_rejects_level_on_opposite_side) {
+    reject_bad_location([](auto& active, Side) { active.at(1).level = active.at(4).level; });
+}
+TEST_CASE(locations_checker_rejects_other_order_same_level) {
+    reject_bad_location([](auto& active, Side) { active.at(1).order = active.at(2).order; });
+}
+TEST_CASE(locations_checker_rejects_order_at_other_level) {
+    reject_bad_location([](auto& active, Side) { active.at(1).order = active.at(3).order; });
+}
+TEST_CASE(locations_checker_rejects_order_on_opposite_side) {
+    reject_bad_location([](auto& active, Side) { active.at(1).order = active.at(4).order; });
+}
+TEST_CASE(locations_checker_rejects_swapped_complete_locations) {
+    reject_bad_location([](auto& active, Side) { std::swap(active.at(1), active.at(2)); });
 }
 } // namespace
 

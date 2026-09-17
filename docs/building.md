@@ -36,10 +36,11 @@ ctest --test-dir build --output-on-failure
 | Target | Purpose |
 | --- | --- |
 | `order_book` | Library compiled from `src/order_book.cpp`; owns matching behavior. |
-| `order_book_tests` | Original scenario tests, followed by a small benchmark. |
+| `order_book_tests` | Original correctness scenario tests. |
 | `order_book_edge_cases` | Individually selectable regression cases registered with CTest. |
+| `order_book_benchmark` | Standalone timing benchmarks from `benchmarks/`; run manually. |
 
-Both executables link the same library. `target_include_directories(order_book
+All three executables link the same library. `target_include_directories(order_book
 PUBLIC ...)` gives the library and consumers access to `include/`. The executables
 link it with `PRIVATE` because they do not export that dependency to consumers.
 Add new source files to the appropriate target in `CMakeLists.txt`.
@@ -87,6 +88,19 @@ ctest --test-dir build/release --output-on-failure
 Release must not inherit the Checked definitions. Invariant tests run in Release, using
 explicit logic-error checks that remain active with NDEBUG. Benchmark output from Debug or
 Checked is not a Release performance baseline.
+
+## Run timing benchmarks
+
+For performance measurements, run the standalone benchmark after configuring
+Release:
+
+```powershell
+cmake --build build/release --target order_book_benchmark
+.\build\release\order_book_benchmark.exe
+```
+
+CTest runs correctness tests only. See [Timing benchmarks](../benchmarks/README.md)
+for the existing workload and the cancellation benchmark exercise.
 
 ## Debug the library
 

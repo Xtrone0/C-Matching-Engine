@@ -17,7 +17,7 @@ struct OrderBookTestAccess
     }
     static auto &ids(OrderBook &book)
     {
-        return book.usedids;
+        return book.active;
     }
     static Priority &counter(OrderBook &book)
     {
