@@ -1,4 +1,4 @@
-#include "../src/order_book.cpp"
+#include "checked_order_book.hpp"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +43,7 @@ void check_trade(
     CHECK(t.quantity == quantity);
 }
 void check_best(
-    const OrderBook &book,
+    const CheckedOrderBook &book,
     std::optional<Price> bid,
     std::optional<Price> ask)
 {
@@ -58,7 +58,7 @@ void check_best(
 // ------------------------------------------------------------
 void test_empty_book()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     CHECK(!book.best_bid());
     CHECK(!book.best_ask());
@@ -68,7 +68,7 @@ void test_empty_book()
 // ------------------------------------------------------------
 void test_resting_buy()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     auto trades = book.submit(buy(1, 100, 5));
 
@@ -77,7 +77,7 @@ void test_resting_buy()
 }
 void test_resting_sell()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     auto trades = book.submit(sell(1, 100, 5));
 
@@ -86,7 +86,7 @@ void test_resting_sell()
 }
 void test_non_crossing_orders()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     CHECK(book.submit(buy(1, 100, 5)).empty());
     CHECK(book.submit(sell(2, 101, 5)).empty());
@@ -95,7 +95,7 @@ void test_non_crossing_orders()
 }
 void test_one_tick_outside_cross()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 101, 5));
 
@@ -109,7 +109,7 @@ void test_one_tick_outside_cross()
 // ------------------------------------------------------------
 void test_exact_fill_buy()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 5));
 
@@ -122,7 +122,7 @@ void test_exact_fill_buy()
 }
 void test_exact_fill_sell()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 5));
 
@@ -135,7 +135,7 @@ void test_exact_fill_sell()
 }
 void test_quantity_one()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 1));
 
@@ -151,7 +151,7 @@ void test_quantity_one()
 // ------------------------------------------------------------
 void test_partial_resting_fill()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 10));
 
@@ -172,7 +172,7 @@ void test_partial_resting_fill()
 }
 void test_partial_incoming_fill()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 3));
 
@@ -193,7 +193,7 @@ void test_partial_incoming_fill()
 }
 void test_partial_fill_then_cancel()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 10));
 
@@ -214,7 +214,7 @@ void test_partial_fill_then_cancel()
 // ------------------------------------------------------------
 void test_resting_sell_determines_execution_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 98, 5));
 
@@ -225,7 +225,7 @@ void test_resting_sell_determines_execution_price()
 }
 void test_resting_buy_determines_execution_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 102, 5));
 
@@ -239,7 +239,7 @@ void test_resting_buy_determines_execution_price()
 // ------------------------------------------------------------
 void test_fifo()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 5));
     book.submit(buy(2, 100, 5));
@@ -266,7 +266,7 @@ void test_fifo()
 // ------------------------------------------------------------
 void test_ask_price_priority()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 101, 5));
     book.submit(sell(2, 99, 5));
@@ -290,7 +290,7 @@ void test_ask_price_priority()
 }
 void test_bid_price_priority()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 99, 5));
     book.submit(buy(2, 101, 5));
@@ -316,7 +316,7 @@ void test_bid_price_priority()
 // ------------------------------------------------------------
 void test_multiple_fills_same_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 3));
     book.submit(sell(2, 100, 4));
@@ -340,7 +340,7 @@ void test_multiple_fills_same_price()
 }
 void test_multi_level_sweep_with_residual()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 98, 2));
     book.submit(sell(2, 99, 3));
@@ -369,7 +369,7 @@ void test_multi_level_sweep_with_residual()
 // ------------------------------------------------------------
 void test_price_level_removed_after_fill()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 5));
     book.submit(sell(2, 101, 5));
@@ -386,7 +386,7 @@ void test_price_level_removed_after_fill()
 }
 void test_best_bid_updates()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 99, 1));
     book.submit(buy(2, 101, 1));
@@ -405,7 +405,7 @@ void test_best_bid_updates()
 }
 void test_best_ask_updates()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 101, 1));
     book.submit(sell(2, 99, 1));
@@ -427,7 +427,7 @@ void test_best_ask_updates()
 // ------------------------------------------------------------
 void test_cancel_only_order()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 5));
 
@@ -436,7 +436,7 @@ void test_cancel_only_order()
 }
 void test_cancel_nonexistent_order()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 5));
 
@@ -445,7 +445,7 @@ void test_cancel_nonexistent_order()
 }
 void test_cancel_already_filled_order()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(sell(1, 100, 5));
     book.submit(buy(2, 100, 5));
@@ -455,7 +455,7 @@ void test_cancel_already_filled_order()
 }
 void test_cancel_first_order_at_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 5));
     book.submit(buy(2, 100, 5));
@@ -469,7 +469,7 @@ void test_cancel_first_order_at_price()
 }
 void test_cancel_middle_order_at_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 2));
     book.submit(buy(2, 100, 2));
@@ -488,7 +488,7 @@ void test_cancel_middle_order_at_price()
 }
 void test_cancel_last_order_at_price()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 100, 2));
     book.submit(buy(2, 100, 2));
@@ -505,7 +505,7 @@ void test_cancel_last_order_at_price()
 }
 void test_cancel_removes_best_price_level()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     book.submit(buy(1, 101, 5));
     book.submit(buy(2, 100, 5));
@@ -517,14 +517,14 @@ void test_cancel_removes_best_price_level()
     CHECK(book.best_bid() == 100);
 }
 // ------------------------------------------------------------
-// Large integral values
+// Largest permitted price and quantity
 // ------------------------------------------------------------
 void test_large_price_and_quantity()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
-    const Price price = std::numeric_limits<Price>::max() - 100;
-    const Quantity quantity = std::numeric_limits<Quantity>::max() / 4;
+    const Price price = 1'000'000'000;
+    const Quantity quantity = 1'000'000'000;
 
     book.submit(sell(1, price, quantity));
 
@@ -542,7 +542,7 @@ void test_many_orders_same_price()
 {
     constexpr int N = 1000;
 
-    OrderBook book;
+    CheckedOrderBook book;
 
     for (int i = 1; i <= N; ++i)
         book.submit(buy(i, 100, 1));
@@ -563,7 +563,7 @@ void test_many_price_levels()
 {
     constexpr int N = 100;
 
-    OrderBook book;
+    CheckedOrderBook book;
 
     for (int i = 0; i < N; ++i)
         book.submit(sell(i + 1, 100 + i, 1));
@@ -587,7 +587,7 @@ void test_many_price_levels()
 // ------------------------------------------------------------
 void test_long_sequence()
 {
-    OrderBook book;
+    CheckedOrderBook book;
 
     CHECK(book.submit(buy(1, 99, 5)).empty());
     check_best(book, 99, std::nullopt);
@@ -645,9 +645,9 @@ void test_randomized_invariants()
     std::uniform_int_distribution<int> action_dist(0, 99);
     std::uniform_int_distribution<int> side_dist(0, 1);
     std::uniform_int_distribution<int> price_dist(90, 110);
-    std::uniform_int_distribution<int> quantity_dist(1, 20);
+    std::uniform_int_distribution<Quantity> quantity_dist(1, 20);
 
-    OrderBook book;
+    CheckedOrderBook book;
 
     std::vector<OrderId> submitted_ids;
     submitted_ids.reserve(EVENTS);

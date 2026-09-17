@@ -2,7 +2,8 @@
 #include <cstdint>
 using OrderId = std::uint64_t;
 using Price = std::int64_t;
-using Quantity = std::int64_t;
+using Quantity = std::uint64_t;
+using Priority = std::uint64_t;
 
 enum class Side
 {
@@ -12,8 +13,8 @@ enum class Side
 struct Order
 {
     OrderId id;
-
     Side side;
     Price price;
     Quantity quantity;
+    Priority priority = 0;
 };
