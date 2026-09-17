@@ -48,6 +48,8 @@ class OrderBook
 {
     // Defined only by regression tests to exercise corrupted internal states.
     friend struct OrderBookTestAccess;
+    // Historical scan cancellation, defined only in benchmarks/.
+    friend class ScanOrderBook;
     Levels bids{PriceCompare{true}};
     Levels asks{PriceCompare{false}};
     std::unordered_map<OrderId, Location> active;
