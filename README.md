@@ -24,8 +24,8 @@ Supports:
 - [Timing benchmarks](benchmarks/README.md): separate executable, Release run
   commands, and the scan-versus-index cancellation exercise.
 
-On 2026-09-17, all **104 CTest entries passed** in Debug, Release, and Checked
+On 2026-09-17, all **118 CTest entries passed** in Debug, Release, and Checked
 configurations, with no failures or skips. Coverage includes market orders,
 full snapshots, explicit invariant checks, deliberately corrupted states, and
-bounded exhaustive command sequences. Indexed cancellation and amendments remain
-later-lesson work.
+bounded exhaustive command sequences. Indexed cancellation and location regression
+tests are implemented; amendments remain later-lesson work.

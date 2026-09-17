@@ -16,8 +16,7 @@ Both executables link the production `order_book` library.
 
 ## Verification
 
-On 2026-09-17, after adding the Lesson 7 location regressions, **110 tests passed,
-8 failed, and none skipped** in each of:
+On 2026-09-17, **118 tests passed, none failed, and none skipped** in each of:
 
 - Debug: `build`
 - Release, with `NDEBUG`: `build/release`
@@ -25,11 +24,10 @@ On 2026-09-17, after adding the Lesson 7 location regressions, **110 tests passe
 
 The checker uses explicit `std::logic_error` conditions and stays active in
 Release. There is no `NDEBUG` skip. CTest reports are saved as
-`lesson7-results.xml` inside each build directory. All 104 previous tests and six
-new location lifecycle tests pass. The eight `locations_checker_rejects_*` tests
-fail because the production checker currently checks active keys but not stored
-`Location` values. These are real missing checks, not skipped or expected-pass
-tests; the full suite is not green until location validation is implemented.
+`lesson7-results.xml` inside each build directory. This includes all 104 previous
+tests, six location lifecycle tests, and eight location rejection tests. The
+20-command mixed sequence is defined directly inside its regression test;
+no separate fixture header is required.
 
 ## Checking every scenario operation
 
@@ -103,7 +101,8 @@ the invariant checker. They do not claim to construct that enormous book.
 
 ## Mixed commands and reference comparisons
 
-[The saved 20-command fixture](fixtures/lesson6_commands.hpp) combines insertion,
+The saved 20-command sequence inside `lesson6_saved_mixed_command_fixture` in
+[order_book_edge_cases.cpp](order_book_edge_cases.cpp) combines insertion,
 sweeps, duplicate and invalid-input rejection, cancellation, market expiration,
 and ID reuse. Exact trade outputs and outcomes are checked separately from the
 reference model, and every step compares the complete snapshot. Keep this fixture
@@ -133,7 +132,8 @@ Prices and individual quantities are in `1..1,000,000,000`; IDs are in
 `1..UINT64_MAX` and unique only while resting. Negative text must be rejected by
 future parsing before conversion to unsigned quantities. Aggregate quantities may
 exceed the per-order bound. Amendments remain future work. Location validation
-now has regression tests but is not yet implemented in the production checker.
+checks the stored side, level price, and order ID. It assumes live iterators;
+matching values do not prove object identity across separate books.
 
 The richer workbook command-result interface is deferred by agreement. Market,
 depth, and invariant adapters retain missing-API skip support, but no current case
